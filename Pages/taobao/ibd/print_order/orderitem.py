@@ -60,25 +60,10 @@ class PrintUser(Page):
     def clickable(self, xpath):
         def predicate(driver):
             try:
-                WebDriverWait(driver, 7).until(
-                    EC.element_to_be_clickable((By.XPATH, xpath))).click()
+                self.click_link(WebDriverWait(driver, 7).until(
+                    EC.element_to_be_clickable((By.XPATH, xpath))))
                 print('collapse')
             except WebDriverException:
-                return False
-            else:
-                return True
-
-        return predicate
-
-    def select(self):
-        self.find(self.user_xpath + "/td[1]/div/div/span").click()
-        WebDriverWait(self.driver, 2).until(self.selected())
-
-    def selected(self):
-        def predicate(driver):
-            try:
-                self.find(self.user_xpath + "[contains(@class, 'bui-grid-row-selected')]")
-            except NoSuchElementException:
                 return False
             else:
                 return True
@@ -88,25 +73,29 @@ class PrintUser(Page):
     def start(self):
         if self.is_refunded:
             print("refund")
-            return
+            return self.selected(False)
         else:
             if '交易成功' not in [i['state'] for i in self.items_response]:
                 if len([i for i in self.items_response if i['shipable']]) == len(self.items_response):
-                    self.select()
+                    return self.selected(True)
                 else:
-                    self.process_unshiped(self.items_response)
+                    return self.process_unshiped(self.items_response)
             else:
                 unshiped = [i for i in self.items_response if i['state'] != '交易成功']
-                self.process_unshiped(unshiped)
+                return self.process_unshiped(unshiped)
 
     def process_unshiped(self, item_list):
         shipables = self.shipable_items(item_list)
         if len(shipables) > 0:
             self.db_manager.rollback(len([i for i in item_list if i['avail_q'] > 0]))
-            self.split(shipables)
+            return self.split(shipables)
         else:
             print('ignore')
             self.note_list([[i['color'], i['avail_q'], i['quantity']] for i in item_list if i['avail_q'] > 0])
+            return self.selected(False)
+
+    def selected(self, tf):
+        return {'index': self.index, 'user_id': self.user_tbid, 'print': tf}
 
     def message_from_color(self, item_list):
         message = ''
@@ -140,6 +129,8 @@ class PrintUser(Page):
             else:
                 if [i for i in good_list if i['overdue']]:
                     return [i['index'] for i in good_list]
+                else:
+                    return []
 
     @Cache
     def items_response(self):
@@ -172,7 +163,6 @@ class PrintUser(Page):
             return []
 
     def split(self, indexlist):
-        print('')
         print('split')
         for index in indexlist:
             self.split_item(index)
@@ -181,7 +171,7 @@ class PrintUser(Page):
         time.sleep(5)
 
         with PrintUser(self.driver, self.index, self.db_manager) as u:
-            u.start()
+            return u.start()
 
     def confirm_split(self):
         self.find(self.confirm_split_xpath).click()

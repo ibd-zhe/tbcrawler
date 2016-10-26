@@ -12,6 +12,7 @@ class PrintOrder(MultiPageTBCrawler):
         super().__init__(driver)
         self.db_manager = db_manager
         self.element_wait_time = 5
+        self.print_list = []
 
     def prepare(self):
         self.login()
@@ -57,8 +58,9 @@ class PrintOrder(MultiPageTBCrawler):
 
     def crawl_curr_page(self):
         for i in range(len(self.driver.find_elements_by_xpath(self.users_xpaths))):
-            print(i)
             self.crawl_user(i)
+            if len(self.print_list) >= 10:
+                self.print()
 
     def wait_load(self):
         WebDriverWait(self.driver, 5).until(
@@ -69,11 +71,11 @@ class PrintOrder(MultiPageTBCrawler):
         def predicate(driver):
             try:
                 driver.find_element_by_class_name('bui-ext-mask')
+                print('find bui-ext-mask')
             except NoSuchElementException:
                 return True
             else:
                 return False
-
         return predicate
 
     def check_pagenumber(self):
@@ -96,14 +98,49 @@ class PrintOrder(MultiPageTBCrawler):
                         return False
             except StaleElementReferenceException:
                 return True
+        return predicate
+
+    def print(self):
+        for i in self.print_list:
+            print(i['index'], i['user_id'])
+            self.select(i['index'], i['user_id'])
+        self.wait_for_yes()
+        del self.print_list[:]
+
+    def wait_for_yes(self):
+        while input("请打印, 打印完了吗?") != 'yes':
+            self.wait_for_yes()
+
+    def select(self, index, user_id):
+        test_user = self.user_id_of(index)
+        assert test_user == user_id, 'wrong userid ' + test_user + ' of index' + str(index) + ' real user' + user_id
+        self.click_link(self.find(self.user_xpth(index) + "/td[1]/div/div/span"))
+        WebDriverWait(self.driver, 2).until(self.selected(self.user_xpth(index)))
+
+    def user_id_of(self, index):
+        return self.find(self.user_xpth(index) + "/td[3]").text
+
+    def selected(self, xpth):
+        def predicate(driver):
+            try:
+                self.find(xpth + "[contains(@class, 'bui-grid-row-selected')]")
+            except NoSuchElementException:
+                return False
+            else:
+                return True
 
         return predicate
 
+    def user_xpth(self, index):
+        return self.users_xpaths + "[{0}]".format(index + 1)
+
     def crawl_user(self, i):
+        print('\n')
         print(str(i) + "th user")
         with PrintUser(self.driver, i, self.db_manager) as u:
-            u.start()
-        print('\n')
+            l = u.start()
+            if l['print'] is True:
+                self.print_list.append(l)
 
     @property
     def users_xpaths(self):
