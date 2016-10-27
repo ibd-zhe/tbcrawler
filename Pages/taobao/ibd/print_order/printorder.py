@@ -2,7 +2,7 @@ from Pages.taobao.tbcrawler import MultiPageTBCrawler
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import StaleElementReferenceException, NoSuchElementException
+from selenium.common.exceptions import StaleElementReferenceException, NoSuchElementException, TimeoutException
 from selenium.webdriver import ActionChains
 from Pages.taobao.ibd.print_order.orderitem import PrintUser
 
@@ -15,7 +15,6 @@ class PrintOrder(MultiPageTBCrawler):
         self.print_list = []
 
     def prepare(self):
-        self.login()
         self.driver.get("http://99tp.cn")
         self.wait("//*[contains(text(),'点此登陆')]").click()
         self.wait("//*[contains(text(),'授权并登录')]").click()
@@ -59,7 +58,7 @@ class PrintOrder(MultiPageTBCrawler):
     def crawl_curr_page(self):
         for i in range(len(self.driver.find_elements_by_xpath(self.users_xpaths))):
             self.crawl_user(i)
-            if len(self.print_list) >= 10:
+            if len(self.print_list) >= 50:
                 self.print()
 
     def wait_load(self):
@@ -104,6 +103,7 @@ class PrintOrder(MultiPageTBCrawler):
         for i in self.print_list:
             print(i['index'], i['user_id'])
             self.select(i['index'], i['user_id'])
+        print(self.db_manager.printout())
         self.wait_for_yes()
         del self.print_list[:]
 
@@ -113,9 +113,20 @@ class PrintOrder(MultiPageTBCrawler):
 
     def select(self, index, user_id):
         test_user = self.user_id_of(index)
-        assert test_user == user_id, 'wrong userid ' + test_user + ' of index' + str(index) + ' real user' + user_id
-        self.click_link(self.find(self.user_xpth(index) + "/td[1]/div/div/span"))
-        WebDriverWait(self.driver, 2).until(self.selected(self.user_xpth(index)))
+        xpth = self.user_xpth(index)
+        assert test_user == user_id, 'wrong userid: ' + test_user + ' of index: ' + str(index) + ' real user: ' + user_id
+        assert self.items_printstate(index) != '已打印', '状态不是发货'
+        self.click_link(self.find(xpth + "/td[1]/div/div/span"))
+        WebDriverWait(self.driver, 2).until(self.selected(xpth))
+        try:
+            self.find(xpth + "/td[2]/div/span[@class='bui-grid-cascade bui-grid-cascade-expand']")
+        except NoSuchElementException:
+            self.click_link((xpth + "/td[2]/div//i"))
+        finally:
+            self.wait(xpth + "/td[2]/div/span[@class='bui-grid-cascade bui-grid-cascade-expand']")
+
+    def items_printstate(self, index):
+        return self.find(self.user_xpth(index) + "/td[10]").text
 
     def user_id_of(self, index):
         return self.find(self.user_xpth(index) + "/td[3]").text
@@ -141,6 +152,8 @@ class PrintOrder(MultiPageTBCrawler):
             l = u.start()
             if l['print'] is True:
                 self.print_list.append(l)
+            else:
+                print('not print')
 
     @property
     def users_xpaths(self):

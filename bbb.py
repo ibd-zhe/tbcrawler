@@ -8,9 +8,8 @@ import csv
 from Pages.taobao.ibd.print_order.print_db_manager import PrintDBManager
 from Pages.taobao.ibd.print_order.printorder import PrintOrder
 
-a = webdriver.Chrome("/Users/jiangjiang/Desktop/Code Projects/Python/tbcrawler/chromedriver")
-bbb = PrintDBManager("Pages/taobao/ibd/print_order/inventory.csv")
+a = webdriver.Ie('IEDriverServer.exe')
+bbb = PrintDBManager("inventory.csv")
 b = PrintOrder(a, bbb)
-b.prepare()
-
+b.goto_login()
 

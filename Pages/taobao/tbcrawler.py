@@ -4,7 +4,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from Pages.page import Page
-
+import time
 
 class TBCrawler(Page):
     def __init__(self, driver):
@@ -29,11 +29,13 @@ class TBCrawler(Page):
 
     def login(self):
         self.goto_login()
-
+        time.sleep(10)
         pwd_login = WebDriverWait(self.driver, 5).until(
             EC.presence_of_element_located(
                 (By.XPATH, "//div[@class='login-links']/a[@class='forget-pwd J_Quick2Static']")))
         ActionChains(self.driver).move_to_element(pwd_login).click(pwd_login).perform()
+
+    def enter_info(self):
         username_tag = 'TPL_username'
         password_tag = 'TPL_password'
         username = WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.NAME, username_tag)))

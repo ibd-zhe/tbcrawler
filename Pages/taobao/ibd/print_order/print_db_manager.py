@@ -18,6 +18,11 @@ class PrintDBManager:
         self.item_px = None
         self.log = []
 
+    def printout(self):
+        printed_color = set([i[0] for i in self.log])
+        for i in printed_color:
+            print(str(i) + "已发" + str(sum([i[1] for i in self.log if i[0] == i]))) + '个'
+
     def rollback(self, times):
         for i in range(len(self.log) - 1, len(self.log) - 1 - times, -1):
             self.data[self.log[i][0]][3] += self.log[i][1]

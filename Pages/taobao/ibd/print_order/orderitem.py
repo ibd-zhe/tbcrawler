@@ -4,7 +4,7 @@ from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException, WebDriverException
 from Pages.page import Page
 from datetime import datetime
-from Util.Cache import Cache
+from Util.Model import Cache, alphanum
 import time
 
 force_ship_period = 29
@@ -43,7 +43,7 @@ class PrintUser(Page):
             EC.invisibility_of_element_located((By.CLASS_NAME, 'bui-ext-mask')))
         WebDriverWait(self.driver, 5).until(
             EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), '下一页')]")))
-        WebDriverWait(self.driver, 5).until(self.loading())
+        WebDriverWait(self.driver, 10).until(self.loading())
 
     def loading(self):
         def predicate(driver):
@@ -62,7 +62,6 @@ class PrintUser(Page):
             try:
                 self.click_link(WebDriverWait(driver, 7).until(
                     EC.element_to_be_clickable((By.XPATH, xpath))))
-                print('collapse')
             except WebDriverException:
                 return False
             else:
@@ -86,7 +85,7 @@ class PrintUser(Page):
 
     def process_unshiped(self, item_list):
         shipables = self.shipable_items(item_list)
-        if len(shipables) > 0:
+        if len(shipables) > 0 and not self.yiqifa:
             self.db_manager.rollback(len([i for i in item_list if i['avail_q'] > 0]))
             return self.split(shipables)
         else:
@@ -127,10 +126,12 @@ class PrintUser(Page):
                     > 1:
                 return [i['index'] for i in good_list]
             else:
-                if [i for i in good_list if i['overdue']]:
+                if [i for i in good_list if i['overdue']] and not (sum([i['px'] for i in bad_list]) < 50 and sum([i['quantity'] for i in bad_list]) <= 2):
+                    print('uuu')
                     return [i['index'] for i in good_list]
                 else:
                     return []
+
 
     @Cache
     def items_response(self):
@@ -142,7 +143,7 @@ class PrintUser(Page):
         r = []
         for itemindex in range(self.item_number):
             xpth = self.items_xpaths + "[{0}]".format(itemindex + 1)
-            item_r = UserItem(self.driver, xpth, self.db_manager, overdue, self.seller_notes).response
+            item_r = UserItem(self.driver, xpth, self.db_manager, overdue, self.color_info_from_seller_note).response
             item_r['index'] = itemindex
             r.append(item_r)
         print(r)
@@ -151,15 +152,26 @@ class PrintUser(Page):
     @Cache
     def seller_notes(self):
         try:
-            ttt = self.find(
+            return self.find(
                 self.user_xpath + "/following-sibling::tr[1]/td/table/tbody/tr[2]//table//tr[contains(.,"
                                   "'备忘')]/td[2]").text
+        except NoSuchElementException:
+            return None
+
+    @property
+    def yiqifa(self):
+        return '一起发' in self.seller_notes or '不拆' in self.seller_notes
+
+    @Cache
+    def color_info_from_seller_note(self):
+        ttt = self.seller_notes
+        if ttt:
             splited_txt = ttt.split('到')
             if len(splited_txt) > 1:
-                return [''.join(j for j in i if j.isalnum()) for i in splited_txt[:-1]]
+                return [alphanum(i) for i in splited_txt[:-1]]
             else:
                 return []
-        except NoSuchElementException:
+        else:
             return []
 
     def split(self, indexlist):
@@ -278,7 +290,8 @@ class UserItem(Page):
                 'overdue': self.overdue,
                 'quantity': self.quantity,
                 'avail_q': self.available_q,
-                'state': self.state
+                'state': self.state,
+                'color': self.color
             }
 
     # Item Computed Property (Based on Business rules)
@@ -300,7 +313,10 @@ class UserItem(Page):
 
     @property
     def in_note(self):
-        if [i for i in self.note_color_list if i in self.color or i in self.title]:
+        alphanum_color = alphanum(self.color)
+        alphanum_title = alphanum(self.title)
+
+        if [i for i in self.note_color_list if i in alphanum_color or i in alphanum_title]:
             return True
         else:
             return False

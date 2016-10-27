@@ -1,4 +1,6 @@
 
+def alphanum(text):
+    return ''.join(j for j in text if j.isalnum())
 
 class Cache:
     def __init__(self, fget):
