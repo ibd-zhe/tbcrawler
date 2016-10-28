@@ -6,6 +6,7 @@ from selenium.webdriver.common.by import By
 from Pages.page import Page
 import time
 
+
 class TBCrawler(Page):
     def __init__(self, driver):
         super().__init__(driver)
@@ -34,6 +35,7 @@ class TBCrawler(Page):
             EC.presence_of_element_located(
                 (By.XPATH, "//div[@class='login-links']/a[@class='forget-pwd J_Quick2Static']")))
         ActionChains(self.driver).move_to_element(pwd_login).click(pwd_login).perform()
+        self.enter_info()
 
     def enter_info(self):
         username_tag = 'TPL_username'

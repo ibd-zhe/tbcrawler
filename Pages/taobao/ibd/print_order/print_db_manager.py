@@ -2,48 +2,71 @@ from DataManager.iteminfodb import ibd_dbinfo
 import psycopg2
 from datetime import datetime
 import csv
+import sqlite3
+from Pages.taobao.ibd.print_order.orderitem import itemidlist
 
 
 class PrintDBManager:
     # [[tsc, itemid, color_keyword, inventory, px]]
-    def __init__(self, csv_path):
+    def __init__(self, csvf=None):
         self.dbinfo = ibd_dbinfo
-        with open(csv_path) as file:
+        self._con = None
+        self.log = []
+        self.pycon = sqlite3.connect('ibd-print.db')
+        self.pycur = self.pycon.cursor()
+        if csvf:
+            self.read_from_csv(csvf)
+
+    def read_from_csv(self, csvf):
+        with open(csvf) as file:
             reader = csv.reader(file)
             data = list(reader)
-        self.data = self.format(data)
-        self.tsc_list = [i[0] for i in self.data]
-        self.validate_tsc(self.tsc_list)
-        self._con = None
-        self.item_px = None
-        self.log = []
+        data1 = self.format(data)
+        tsc_list = [i[0] for i in data1]
+        self.validate_tsc(tsc_list)
+        self.write_to_sqlite(data1)
+
+    def write_to_sqlite(self, data):
+        print('read csv')
+        self.pycur.execute("""DELETE FROM inventory""")
+        self.pycur.executemany("INSERT INTO inventory VALUES (?,?,?,?,?)", data)
+        self.pycon.commit()
 
     def printout(self):
         printed_color = set([i[0] for i in self.log])
-        for i in printed_color:
-            print(str(i) + "已发" + str(sum([i[1] for i in self.log if i[0] == i]))) + '个'
+        printed_number = [[i, sum([j[1] for j in self.log if j[0] == i])] for i in printed_color]
+        left = self.get_colnum(list(printed_color))
+        for i in printed_number:
+            print(i[0] + "已发" + str(i[1]) + '个. ' + '还剩' + str(left[[j[0] for j in left].index(i[0])][1]) +
+                  '个')
+
+    def get_colnum(self, color_list):
+        query = '(' + ','.join('?' for i in color_list) + ')'
+        self.pycur.execute("SELECT color,inventory FROM inventory WHERE color IN" + query, color_list)
+        return self.pycur.fetchall()
 
     def rollback(self, times):
         for i in range(len(self.log) - 1, len(self.log) - 1 - times, -1):
-            self.data[self.log[i][0]][3] += self.log[i][1]
+            self.pycur.execute("UPDATE inventory SET inventory=inventory+? WHERE color=?", (self.log[i][1],
+                               self.log[i][0]))
+            self.pycon.commit()
 
     def format(self, data):
-        return [[i[0], int(i[1]), i[2], int(i[3]), float(i[4])] for i in data[1:]]
+        return [[i[0].upper(), int(i[1]), i[2].upper(), int(i[3]), float(i[4])] for i in data[1:]]
 
     def validate_tsc(self, tsc_list):
         assert len(tsc_list) == len(set(tsc_list)), "duplicate tsc"
 
     def check_pq(self, info):
-        index = self.find_index(info)
-        if index:
-            p = self.data[index][4]
-            q = self.data[index][3]
+        color = self.find_color(info)
+        if color:
+            p, q = self.pq_by_color(color)
             if q > 0:
                 if q > info['q']:
-                    self.deduct(index, info['q'])
+                    self.deduct_by_color(color, info['q'])
                     return p, info['q']
                 else:
-                    self.deduct(index, q)
+                    self.deduct_by_color(color, q)
                     return p, q
             else:
                 return 0, 0
@@ -51,9 +74,39 @@ class PrintDBManager:
             px = self.find_px_in_db(info['itemid'], info['color'])
             return px, 0
 
-    def deduct(self, index, amount):
-        self.data[index][3] -= amount
-        self.log.append([index, amount])
+    def find_color(self, info):
+        if info['itemid'] in itemidlist:
+            color = self.color_by_tsc(info['tsc'])
+            if color:
+                return color
+            else:
+                return self.color_by_color(info['itemid'], info['color'])
+
+    def deduct_by_color(self, color, q):
+        self.pycur.execute("UPDATE inventory SET inventory=inventory-? WHERE color=?", (q, color))
+        self.log.append([color, q])
+        self.pycon.commit()
+
+    def pq_by_color(self, color):
+        self.pycur.execute("SELECT px,inventory FROM inventory WHERE color=?", (color, ))
+        return self.pycur.fetchone()
+
+    def color_by_tsc(self, tsc):
+        if tsc:
+            self.pycur.execute("SELECT color FROM inventory WHERE ? Like '%'||tsc||'%'", (tsc.upper(), ))
+            color = self.pycur.fetchone()
+            if color:
+                return color[0]
+
+    def color_by_color(self, itemid, color):
+        try:
+            self.pycur.execute("SELECT color FROM inventory WHERE itemid=? AND ? Like '%'||color||'%'", (itemid, color.upper()))
+            color = self.pycur.fetchone()
+        except (TypeError, AttributeError):
+            return None
+        else:
+            if color:
+                return color[0]
 
     def find_px_in_db(self, itemid, color):
         cur = self.con.cursor()
@@ -66,37 +119,6 @@ class PrintDBManager:
             return p[0]
         else:
             return 0
-
-    def find_index(self, info):
-        index = self.find_index_by_tsc(info['tsc'])
-        if index:
-            return index
-        else:
-            return self.find_index_by_color(info['itemid'], info['color'])
-
-    def find_index_by_color(self, itemid, color):
-        try:
-            index = [index for index, i in enumerate(self.data) if i[1] == itemid and i[2] in color.upper()]
-            if len(index) > 1:
-                raise ValueError
-            if index:
-                return index[0]
-            else:
-                return None
-        except (TypeError, AttributeError):
-            return None
-
-    def find_index_by_tsc(self, tsc):
-        try:
-            tsc_index = [index for index, i in enumerate(self.tsc_list) if i in tsc.upper()]
-            if len(tsc_index) > 1:
-                raise ValueError
-            if tsc_index:
-                return tsc_index[0]
-            else:
-                return None
-        except (TypeError, AttributeError):
-            return None
 
     def date_of_order(self, ordernumber):
         cur = self.con.cursor()

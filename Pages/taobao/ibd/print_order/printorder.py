@@ -8,13 +8,21 @@ from Pages.taobao.ibd.print_order.orderitem import PrintUser
 
 
 class PrintOrder(MultiPageTBCrawler):
-    def __init__(self, driver, db_manager):
+    def __init__(self, driver, db_manager, condition=None):
         super().__init__(driver)
         self.db_manager = db_manager
         self.element_wait_time = 5
         self.print_list = []
+        self.time_format = '%Y-%m-%d %H:%M'
+        self.condition = condition
+
+        if condition:
+            self.startff = 0
+        else:
+            self.startff = 1
 
     def prepare(self):
+        self.login()
         self.driver.get("http://99tp.cn")
         self.wait("//*[contains(text(),'点此登陆')]").click()
         self.wait("//*[contains(text(),'授权并登录')]").click()
@@ -26,7 +34,6 @@ class PrintOrder(MultiPageTBCrawler):
         WebDriverWait(self.driver, 5).until(
             EC.presence_of_element_located((By.CLASS_NAME, 'bui-ext-close'))).click()
         self.switch_frame()
-        self.filter()
         self.change_time_order()
 
     def switch_frame(self):
@@ -57,9 +64,17 @@ class PrintOrder(MultiPageTBCrawler):
 
     def crawl_curr_page(self):
         for i in range(len(self.driver.find_elements_by_xpath(self.users_xpaths))):
-            self.crawl_user(i)
-            if len(self.print_list) >= 50:
-                self.print()
+            print('')
+            print(i)
+            if self.condition:
+                if self.user_id_of(i) == self.condition[0] and self.order_timetxt(i) == self.condition[1]:
+                    self.startff = 1
+            if self.startff == 1:
+                self.crawl_user(i)
+                print(self.db_manager.printout())
+
+    def order_timetxt(self, index):
+        return self.find(self.user_xpth(index) + "/td[13]").text
 
     def wait_load(self):
         WebDriverWait(self.driver, 5).until(
@@ -98,14 +113,6 @@ class PrintOrder(MultiPageTBCrawler):
             except StaleElementReferenceException:
                 return True
         return predicate
-
-    def print(self):
-        for i in self.print_list:
-            print(i['index'], i['user_id'])
-            self.select(i['index'], i['user_id'])
-        print(self.db_manager.printout())
-        self.wait_for_yes()
-        del self.print_list[:]
 
     def wait_for_yes(self):
         while input("请打印, 打印完了吗?") != 'yes':
@@ -146,14 +153,8 @@ class PrintOrder(MultiPageTBCrawler):
         return self.users_xpaths + "[{0}]".format(index + 1)
 
     def crawl_user(self, i):
-        print('\n')
-        print(str(i) + "th user")
         with PrintUser(self.driver, i, self.db_manager) as u:
-            l = u.start()
-            if l['print'] is True:
-                self.print_list.append(l)
-            else:
-                print('not print')
+            u.start()
 
     @property
     def users_xpaths(self):

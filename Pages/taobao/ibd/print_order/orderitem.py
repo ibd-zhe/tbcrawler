@@ -8,6 +8,9 @@ from Util.Model import Cache, alphanum
 import time
 
 force_ship_period = 29
+exit_state = ['卖家已发货', '交易成功']
+no_print = ['一起发', '不拆', '跟', '并单']
+itemidlist = [522670827437, 45388387252, 520080125216]
 
 
 class PrintUser(Page):
@@ -72,46 +75,90 @@ class PrintUser(Page):
     def start(self):
         if self.is_refunded:
             print("refund")
-            return self.selected(False)
+        elif self.printed:
+            print('already printed')
         else:
-            if '交易成功' not in [i['state'] for i in self.items_response]:
+            if len([i for i in self.items_response if i['state'] in exit_state]) == 0:
                 if len([i for i in self.items_response if i['shipable']]) == len(self.items_response):
-                    return self.selected(True)
+                    if self.find_gendan(self.items_response):
+                        self.selected()
                 else:
-                    return self.process_unshiped(self.items_response)
+                    self.process_unshiped(self.items_response)
             else:
-                unshiped = [i for i in self.items_response if i['state'] != '交易成功']
-                return self.process_unshiped(unshiped)
+                unshiped = [i for i in self.items_response if i['state'] not in exit_state]
+                self.process_unshiped(unshiped)
 
     def process_unshiped(self, item_list):
         shipables = self.shipable_items(item_list)
-        if len(shipables) > 0 and not self.yiqifa:
+        if len(shipables) > 0 and self.find_gendan(item_list):
             self.db_manager.rollback(len([i for i in item_list if i['avail_q'] > 0]))
-            return self.split(shipables)
+            self.split(shipables)
         else:
             print('ignore')
-            self.note_list([[i['color'], i['avail_q'], i['quantity']] for i in item_list if i['avail_q'] > 0])
-            return self.selected(False)
+            self.note_list(item_list)
 
-    def selected(self, tf):
-        return {'index': self.index, 'user_id': self.user_tbid, 'print': tf}
+    @property
+    def printed(self):
+        if self.seller_notes:
+            return '打印' in self.seller_notes
+
+    def selected(self):
+        print('打印')
+        self.leave_message('打印')
+
+    def find_gendan(self, item_list):
+        if self.seller_notes:
+            if [i for i in no_print if i in self.seller_notes]:
+                self.note_list(item_list)
+                print('跟跟蛋蛋 ' + self.user_tbid)
+                return False
+            else:
+                return True
+        else:
+            return True
+
+    def note_list(self, item_list):
+        message = self.message_from_color(self.message_list(item_list))
+        self.leave_message(message)
+
+    def leave_message(self, message):
+        if message:
+            print('leave message  ' + message)
+            self.open_edit()
+            self.wait(
+                "//body/div[contains(@class,'bui-dialog')]//*[contains(text(),"
+                "'卖家备忘')]/following-sibling::div/textarea").send_keys(
+                message)
+            self.find("//body/div[contains(@class,'bui-dialog')]//button[./text()='保存']").click()
+            self.driver.switch_to_default_content()
+            WebDriverWait(self.driver, self.element_wait_time).until(
+                EC.visibility_of_element_located((By.CLASS_NAME, 'bui-message')))
+            if1 = self.driver.find_element_by_xpath("//iframe[@id='TradelistIndex']")
+            self.driver.switch_to_frame(if1)
+            self.close_edit()
+
+    def message_list(self, item_list):
+        return [[i['color'], i['avail_q'], i['quantity']] for i in item_list if i['avail_q'] > 0]
 
     def message_from_color(self, item_list):
         message = ''
         for index, i in enumerate(item_list):
-            if i[1] == i[2]:
-                tmp_m = i[0] + '全到'
-            else:
-                tmp_m = i[0] + '到' + str(i[1]) + '个'
-            if index == len(item_list) - 1:
-                message += tmp_m
-            else:
-                message += tmp_m + '<br>'
+            if [j for j in self.color_info_from_seller_note if j['color'].upper() in i[0].upper()]:
+                continue
+            if i[1] > 0:
+                tmp_m = self.color_format(i[0], i[1])
+                if index == len(item_list) - 1:
+                    message += tmp_m
+                else:
+                    message += tmp_m + '<br>'
+
         return message
 
-    def note_list(self, item_list):
-        message = self.message_from_color(item_list)
-        self.leave_message(message)
+    def color_format(self, color, q):
+        if q == 1:
+            return '[' + color + ']'
+        else:
+            return '[' + color + '#' + str(q) + ']'
 
     # all item is 等待卖家发货
     def shipable_items(self, item_list):
@@ -131,7 +178,6 @@ class PrintUser(Page):
                     return [i['index'] for i in good_list]
                 else:
                     return []
-
 
     @Cache
     def items_response(self):
@@ -158,21 +204,48 @@ class PrintUser(Page):
         except NoSuchElementException:
             return None
 
-    @property
-    def yiqifa(self):
-        return '一起发' in self.seller_notes or '不拆' in self.seller_notes
-
     @Cache
     def color_info_from_seller_note(self):
         ttt = self.seller_notes
         if ttt:
-            splited_txt = ttt.split('到')
-            if len(splited_txt) > 1:
-                return [alphanum(i) for i in splited_txt[:-1]]
+            if not self.is_newform(ttt):
+                return self.processdao(ttt)
             else:
-                return []
+                return self.process_color_new(ttt)
         else:
             return []
+
+    def process_color_new(self, text):
+        color_start = [index for index, i in enumerate(text) if i == '[']
+        color_end = [index for index, i in enumerate(text) if i == ']']
+        color_pos = [(color_start[i], color_end[i]) for i in range(len(color_start))]
+        colors = []
+        for i, j in color_pos:
+            sp = text[i + 1: j].split('#')
+            aln_color = alphanum(sp[0])
+            if len(sp) > 1:
+                colors.append({'color': aln_color, 'q': sp[1]})
+            else:
+                colors.append({'color': aln_color, 'q': 1})
+        dao_txt = ''
+        for index, i in enumerate(color_start):
+            if index == 0:
+                dao_txt += text[:i]
+            else:
+                dao_txt += text[color_end[index - 1]:i]
+
+        colors.extend(self.processdao(dao_txt))
+        return colors
+
+    def processdao(self, text):
+        splited_txt = text.split('到')
+        if len(splited_txt) > 1:
+            return [{'color': alphanum(i), 'q': 1} for i in splited_txt[:-1]]
+        else:
+            return []
+
+    def is_newform(self, text):
+        return '[' in text and ']' in text
 
     def split(self, indexlist):
         print('split')
@@ -239,22 +312,6 @@ class PrintUser(Page):
     def is_merged(self):
         return '合' in self.note
 
-    def leave_message(self, message):
-        if message:
-            print('leave message  ' + message)
-            self.open_edit()
-            self.wait(
-                "//body/div[contains(@class,'bui-dialog')]//*[contains(text(),"
-                "'卖家备忘')]/following-sibling::div/textarea").send_keys(
-                message)
-            self.find("//body/div[contains(@class,'bui-dialog')]//button[./text()='保存']").click()
-            self.driver.switch_to_default_content()
-            WebDriverWait(self.driver, self.element_wait_time).until(
-                EC.visibility_of_element_located((By.CLASS_NAME, 'bui-message')))
-            if1 = self.driver.find_element_by_xpath("//iframe[@id='TradelistIndex']")
-            self.driver.switch_to_frame(if1)
-            self.close_edit()
-
     @property
     def user_tbid(self):
         return self.find(self.user_xpath + "/td[3]").text
@@ -281,8 +338,8 @@ class UserItem(Page):
     # API
     @property
     def response(self):
-        if self.state == '交易成功':
-            return {'state': '交易成功'}
+        if self.state == '交易成功' or self.state == '卖家已发货':
+            return {'state': self.state}
         else:
             return {
                 'shipable': self.shipable,
@@ -297,7 +354,7 @@ class UserItem(Page):
     # Item Computed Property (Based on Business rules)
     @property
     def shipable(self):
-        if self.itemid == 44572730041 or self.itemid == 520319702760:
+        if self.itemid in itemidlist:
             if self.available_q >= self.quantity:
                 return True
             else:
@@ -313,10 +370,11 @@ class UserItem(Page):
 
     @property
     def in_note(self):
-        alphanum_color = alphanum(self.color)
-        alphanum_title = alphanum(self.title)
+        alphanum_color = alphanum(self.color).upper()
+        alphanum_title = alphanum(self.title).upper()
 
-        if [i for i in self.note_color_list if i in alphanum_color or i in alphanum_title]:
+        if [i for i in self.note_color_list if i['color'].upper() in alphanum_color or i['color'].upper() in
+                alphanum_title]:
             return True
         else:
             return False
@@ -363,7 +421,7 @@ class UserItem(Page):
 
     @Cache
     def quantity(self):
-        return int(self.find(self.xpth + "/td[9]").text)
+        return int(self.find(self.xpth + "/td[9]/div/span/p").text)
 
     @Cache
     def ordernumber(self):

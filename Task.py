@@ -9,20 +9,20 @@ from Pages.taobao.ibd.ibd_data_crawl.SoldItem import SoldItem
 
 
 def crawl_selling_item():
-    driver = webdriver.Chrome("/Users/jiangjiang/Desktop/Code Projects/Python/tbcrawler/chromedriver")
+    driver = webdriver.Chrome("/Users/jiangjiang/Desktop/Code Projects/Python/chromedriver")
     a = SellingItem(driver, ItemDB)
     a.start()
 
 
 def add_item_sales(start=None, end=None):
-    driver = webdriver.Chrome("/Users/jiangjiang/Desktop/Code Projects/Python/tbcrawler/chromedriver")
+    driver = webdriver.Chrome("/Users/jiangjiang/Desktop/Code Projects/Python/chromedriver")
     b = ItemSalesDB()
     a = SoldItem(driver, b, begin_time=start, end_time=end)
     a.start()
 
 
 def print_order():
-    a = webdriver.Chrome("/Users/jiangjiang/Desktop/Code Projects/Python/tbcrawler/chromedriver")
+    a = webdriver.Chrome("/Users/jiangjiang/Desktop/Code Projects/Python/chromedriver")
     b = PrintOrder(a)
     b.start()
 
